@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Morse Code Pro - War Room Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Special+Elite&display=swap');
+
+        :root {
+            --army-green: #353b2d;
+            --stencil-yellow: #d4af37;
+            --crt-glow: rgba(212, 175, 55, 0.2);
+        }
+
+        body {
+            background-color: #1a1c18;
+            background-image: radial-gradient(#2a2d24 1px, transparent 1px);
+            background-size: 20px 20px;
+            font-family: 'Special Elite', system-ui, serif;
+            overflow-x: hidden;
+            color: #d1d5db;
+        }
+
+        .stencil-text {
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+
+        @keyframes crt-flicker {
+            0% { opacity: 0.97; }
+            5% { opacity: 0.95; }
+            10% { opacity: 0.9; }
+            15% { opacity: 0.95; }
+            30% { opacity: 0.98; }
+            45% { opacity: 0.85; }
+            50% { opacity: 0.95; }
+            80% { opacity: 0.98; }
+            100% { opacity: 0.99; }
+        }
+
+        .light-active-dot {
+            background-color: #fbbf24 !important;
+            box-shadow: 0 0 70px #fbbf24, inset 0 0 30px rgba(255,255,255,0.7);
+            transform: scale(1.05);
+            animation: crt-flicker 0.1s infinite;
+        }
+
+        .light-active-dash {
+            background-color: #f59e0b !important;
+            box-shadow: 0 0 120px #f59e0b, inset 0 0 40px rgba(255,255,255,0.8);
+            transform: scale(1.2);
+            animation: crt-flicker 0.1s infinite;
+        }
+
+        .char-active {
+            background-color: #fbbf24 !important;
+            color: #000000 !important;
+            box-shadow: 0 0 20px #fbbf24;
+            font-weight: bold;
+        }
+
+        /* Redaction effect applied only to content, not controls */
+        .redacted-content {
+            filter: blur(25px) grayscale(1);
+            pointer-events: none;
+            opacity: 0.1;
+            user-select: none;
+        }
+
+        .classified-bg {
+            background: #242820;
+            border: 3px solid #4a5142;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Fullscreen Optimized Layout */
+        #appShell:fullscreen {
+            background-color: #121410;
+            padding: 2vh 4vw;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden; 
+        }
+
+        #appShell:fullscreen .max-w-4xl {
+            max-width: 95vw;
+            height: 96vh;
+            display: grid;
+            grid-template-areas: 
+                "header header"
+                "lamp ops"
+                "lamp manual";
+            grid-template-columns: 1fr 2fr;
+            grid-template-rows: auto 1fr auto;
+            gap: 2vh;
+        }
+
+        #appShell:fullscreen #headerArea { grid-area: header; border-bottom-width: 2px; padding-bottom: 1vh; }
+        #appShell:fullscreen #lampArea { 
+            grid-area: lamp; 
+            height: 100%; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center;
+            background: rgba(0,0,0,0.5);
+            border-radius: 2rem;
+        }
+        #appShell:fullscreen #appContainer { grid-area: ops; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+        #appShell:fullscreen #hintBox { grid-area: manual; margin-top: 0; }
+
+        /* Dynamic Font Sizing for Fullscreen */
+        #appShell:fullscreen #signalLight { width: 35vh; height: 35vh; }
+        #appShell:fullscreen #textInput { flex: 1; font-size: 2rem; }
+        #appShell:fullscreen #morseOutput { flex: 1.5; font-size: 3rem; max-height: none; }
+        #appShell:fullscreen .stencil-text { font-size: 3vh; }
+
+        .metal-btn {
+            background: linear-gradient(145deg, #4a5142, #2a2d24);
+            border: 2px solid #5a6250;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.6);
+            transition: all 0.2s ease;
+        }
+
+        .metal-btn:active {
+            box-shadow: inset 3px 3px 8px rgba(0,0,0,0.8);
+            transform: translateY(2px);
+        }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1c18; }
+        ::-webkit-scrollbar-thumb { background: #4a5142; border-radius: 4px; }
+    </style>
+</head>
+<body class="text-stone-200 min-h-screen flex flex-col items-center p-4 md:p-10">
+
+    <div id="appShell" class="w-full flex flex-col items-center">
+        <div class="max-w-4xl w-full space-y-6">
+            
+            <!-- Header -->
+            <div id="headerArea" class="flex justify-between items-center border-b-4 border-stone-700 pb-4">
+                <div class="text-left">
+                    <h1 class="text-3xl md:text-5xl font-extrabold stencil-text text-white italic tracking-widest">SIGNAL INTELLIGENCE</h1>
+                    <p class="text-stone-400 text-[10px] md:text-sm tracking-[0.4em] uppercase font-bold">Strategic Communications Command // Sector 7-Alpha</p>
+                </div>
+                <button id="fullscreenBtn" class="p-3 metal-btn rounded-lg hover:border-amber-500 transition-all">
+                    <svg id="fsIconEnter" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+                    <svg id="fsIconExit" class="hidden" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>
+                </button>
+            </div>
+
+            <!-- Signal Lamp -->
+            <div id="lampArea" class="flex flex-col items-center justify-center py-6 bg-black/40 rounded-3xl border-2 border-white/10 shadow-inner">
+                <div id="signalLight" class="w-44 h-44 md:w-56 md:h-56 rounded-full bg-zinc-950 border-[12px] border-stone-800 transition-all duration-75 flex flex-col items-center justify-center relative shadow-[inset_0_0_60px_rgba(0,0,0,1)]">
+                    <div class="absolute inset-0 rounded-full bg-gradient-to-tr from-transparent via-white/5 to-white/10 pointer-events-none"></div>
+                    <div id="signalStatus" class="text-stone-500 font-black uppercase tracking-[0.5em] text-[10px] pointer-events-none z-10">Standby</div>
+                </div>
+                <div class="mt-6 flex gap-6 px-4 py-2 bg-black/30 rounded-full border border-stone-800">
+                    <label class="flex items-center gap-2 cursor-pointer text-[10px] uppercase font-black text-stone-500 hover:text-white transition-colors">
+                        <input type="checkbox" id="audioToggle" checked class="accent-amber-500"> Sonal
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer text-[10px] uppercase font-black text-stone-500 hover:text-white transition-colors">
+                        <input type="checkbox" id="visualToggle" checked class="accent-amber-500"> Optic
+                    </label>
+                    <div class="h-4 w-[1px] bg-stone-700"></div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-[10px] text-stone-600 uppercase font-black">WPM</span>
+                        <input type="range" id="speedInput" min="5" max="40" value="18" class="w-20 h-1 accent-amber-500">
+                        <span id="speedDisplay" class="text-xs font-mono text-amber-500 font-bold">18</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operations Desk -->
+            <div id="appContainer" class="classified-bg rounded-xl p-4 md:p-8 shadow-2xl space-y-6">
+                
+                <!-- Input Area (Header with toggles separated from text for clarity) -->
+                <div class="flex flex-col space-y-2">
+                    <div class="flex justify-between items-center relative z-20">
+                        <label class="text-[10px] md:text-sm font-black text-stone-500 uppercase tracking-widest">Intelligence Feed:</label>
+                        <label class="flex items-center gap-2 cursor-pointer group">
+                            <input type="checkbox" id="hideMessageToggle" class="sr-only peer">
+                            <div class="w-10 h-5 bg-stone-900 rounded border border-stone-600 peer peer-checked:bg-red-700 transition-all relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:w-3.5 after:h-3.5 after:transition-all peer-checked:after:translate-x-5"></div>
+                            <span class="text-[9px] font-black uppercase text-stone-300 group-hover:text-amber-500 transition-colors">Censor Input</span>
+                        </label>
+                    </div>
+                    <textarea id="textInput" placeholder="AWAITING INPUT..." 
+                        class="w-full bg-black/40 border-2 border-stone-800 p-4 text-xl md:text-3xl font-mono text-white focus:border-amber-600 outline-none transition-all resize-none h-32 placeholder:text-stone-900 transition-all duration-300"></textarea>
+                </div>
+
+                <!-- Action Bar -->
+                <div class="flex items-center gap-4 relative z-20">
+                    <button id="playBtn" class="flex-1 metal-btn text-amber-500 py-4 rounded-lg font-black md:text-xl stencil-text hover:text-amber-300 flex items-center justify-center gap-3">
+                        <div class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></div>
+                        TRANSMIT
+                    </button>
+                    <button id="stopBtn" class="hidden flex-1 bg-red-950 border-2 border-red-600 text-red-100 py-4 rounded-lg font-black md:text-xl stencil-text">
+                        ABORT
+                    </button>
+                </div>
+
+                <!-- Output Display -->
+                <div class="flex flex-col space-y-2">
+                    <div class="flex justify-between items-center relative z-20">
+                        <label class="text-[10px] md:text-sm font-black text-stone-500 uppercase tracking-widest">Coded Output:</label>
+                        <label class="flex items-center gap-2 cursor-pointer group">
+                            <input type="checkbox" id="hideMorseToggle" class="sr-only peer">
+                            <div class="w-10 h-5 bg-stone-900 rounded border border-stone-600 peer peer-checked:bg-red-700 transition-all relative after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:w-3.5 after:h-3.5 after:transition-all peer-checked:after:translate-x-5"></div>
+                            <span class="text-[9px] font-black uppercase text-stone-300 group-hover:text-amber-500 transition-colors">Censor Code</span>
+                        </label>
+                    </div>
+                    <div id="morseOutput" class="w-full bg-black/60 border-2 border-stone-900 rounded-lg p-6 font-mono text-3xl md:text-5xl tracking-[0.2em] min-h-[120px] flex flex-wrap gap-4 content-start overflow-y-auto max-h-60 text-stone-700 transition-all duration-300">
+                        <!-- Morse tokens -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Field Manual -->
+            <div id="hintBox" class="bg-[#242820] border-l-4 border-amber-900 p-4 text-[10px] text-stone-500 uppercase tracking-tight">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 opacity-70 font-bold">
+                    <p>DOT: 1 UNIT</p>
+                    <p>DASH: 3 UNITS</p>
+                    <p>SYMBOL GAP: 1 UNIT</p>
+                    <p>WORD GAP: 7 UNITS (/)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MORSE_MAP = {
+            'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.',
+            'G': '--.', 'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..',
+            'M': '--', 'N': '-.', 'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.',
+            'S': '...', 'T': '-', 'U': '..-', 'V': '...-', 'W': '.--', 'X': '-..-',
+            'Y': '-.--', 'Z': '--..', '1': '.----', '2': '..---', '3': '...--',
+            '4': '....-', '5': '.....', '6': '-....', '7': '--...', '8': '---..',
+            '9': '----.', '0': '-----', ' ': '/', '.': '.-.-.-', ',': '--..--',
+            '?': '..--..', '!': '-.-.--', '@': '.--.-.'
+        };
+
+        const appShell = document.getElementById('appShell');
+        const textInput = document.getElementById('textInput');
+        const morseOutput = document.getElementById('morseOutput');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const audioToggle = document.getElementById('audioToggle');
+        const visualToggle = document.getElementById('visualToggle');
+        const speedInput = document.getElementById('speedInput');
+        const speedDisplay = document.getElementById('speedDisplay');
+        const signalLight = document.getElementById('signalLight');
+        const signalStatus = document.getElementById('signalStatus');
+        const hideMessageToggle = document.getElementById('hideMessageToggle');
+        const hideMorseToggle = document.getElementById('hideMorseToggle');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        const fsIconEnter = document.getElementById('fsIconEnter');
+        const fsIconExit = document.getElementById('fsIconExit');
+
+        let audioCtx = null;
+        let isPlaying = false;
+        let playTimeout = null;
+
+        function updateVisibility() {
+            // Apply censorship only to the specific content containers
+            textInput.classList.toggle('redacted-content', hideMessageToggle.checked);
+            morseOutput.classList.toggle('redacted-content', hideMorseToggle.checked);
+        }
+
+        hideMessageToggle.addEventListener('change', updateVisibility);
+        hideMorseToggle.addEventListener('change', updateVisibility);
+
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                appShell.requestFullscreen().catch(err => console.error(err));
+            } else {
+                document.exitFullscreen();
+            }
+        });
+
+        document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement) {
+                fsIconEnter.classList.add('hidden');
+                fsIconExit.classList.remove('hidden');
+            } else {
+                fsIconEnter.classList.remove('hidden');
+                fsIconExit.classList.add('hidden');
+            }
+        });
+
+        speedInput.addEventListener('input', (e) => {
+            speedDisplay.innerText = e.target.value;
+        });
+
+        textInput.addEventListener('input', updateMorseDisplay);
+
+        function updateMorseDisplay() {
+            const text = textInput.value.toUpperCase();
+            morseOutput.innerHTML = '';
+            for (let char of text) {
+                const code = MORSE_MAP[char] || '';
+                if (code) {
+                    const span = document.createElement('span');
+                    span.className = 'px-1 transition-all duration-100';
+                    span.innerText = code === '/' ? ' / ' : code;
+                    morseOutput.appendChild(span);
+                }
+            }
+        }
+
+        async function transmit() {
+            if (isPlaying) return;
+            const text = textInput.value.toUpperCase();
+            if (!text.trim()) return;
+
+            isPlaying = true;
+            playBtn.classList.add('hidden');
+            stopBtn.classList.remove('hidden');
+            signalStatus.innerText = "SIGNAL ACTIVE";
+            signalStatus.classList.replace('text-stone-500', 'text-amber-500');
+
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const wpm = parseInt(speedInput.value);
+            const unitTime = 1200 / wpm; 
+            const spans = morseOutput.querySelectorAll('span');
+            
+            for (let i = 0; i < text.length; i++) {
+                if (!isPlaying) break;
+                const char = text[i];
+                const code = MORSE_MAP[char];
+                const span = spans[i];
+
+                if (span) {
+                    span.classList.add('char-active');
+                    span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+
+                if (code === '/') {
+                    await sleep(unitTime * 7); 
+                } else if (code) {
+                    for (let symbol of code) {
+                        if (!isPlaying) break;
+                        const isDash = symbol === '-';
+                        const duration = isDash ? unitTime * 3 : unitTime;
+                        const activeClass = isDash ? 'light-active-dash' : 'light-active-dot';
+                        if (audioToggle.checked) startTone();
+                        if (visualToggle.checked) signalLight.classList.add(activeClass);
+                        await sleep(duration);
+                        stopTone();
+                        signalLight.classList.remove('light-active-dash', 'light-active-dot');
+                        await sleep(unitTime); 
+                    }
+                    await sleep(unitTime * 3); 
+                }
+                if (span) span.classList.remove('char-active');
+            }
+            stopTransmission();
+        }
+
+        let oscillator = null;
+        let gainNode = null;
+
+        function startTone() {
+            if (oscillator) stopTone();
+            oscillator = audioCtx.createOscillator();
+            gainNode = audioCtx.createGain();
+            oscillator.type = 'square'; 
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.005);
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+        }
+
+        function stopTone() {
+            if (oscillator) {
+                const currentOsc = oscillator;
+                const currentGain = gainNode;
+                currentGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.015);
+                setTimeout(() => {
+                    try { currentOsc.stop(); currentOsc.disconnect(); } catch(e) {}
+                }, 25);
+                oscillator = null;
+            }
+        }
+
+        function stopTransmission() {
+            isPlaying = false;
+            stopTone();
+            signalLight.classList.remove('light-active-dash', 'light-active-dot');
+            signalStatus.innerText = "STANDBY";
+            signalStatus.classList.replace('text-amber-500', 'text-stone-500');
+            playBtn.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
+            morseOutput.querySelectorAll('.char-active').forEach(s => s.classList.remove('char-active'));
+        }
+
+        function sleep(ms) { return new Promise(resolve => { playTimeout = setTimeout(resolve, ms); }); }
+
+        playBtn.addEventListener('click', transmit);
+        stopBtn.addEventListener('click', () => {
+            clearTimeout(playTimeout);
+            stopTransmission();
+        });
+
+    </script>
+</body>
+</html>
