@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Binca Stitch Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --binca-bg: #fdf5e6; 
+            --binca-grid: #f0e6d2;
+            --hole-color: #d7ccc8;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; 
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            height: 100vh;
+            height: -webkit-fill-available;
+        }
+
+        #grid-viewport {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #cbd5e1;
+            position: relative;
+            cursor: crosshair;
+            border-radius: 12px;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.1);
+            outline: none;
+            touch-action: none;
+        }
+
+        #canvas-transform-layer {
+            position: absolute;
+            transform-origin: 0 0;
+            will-change: transform;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .binca-grid {
+            display: grid;
+            background-color: var(--binca-bg);
+            border: 2px solid #e2e8f0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            touch-action: none;
+            position: relative;
+        }
+
+        .cell {
+            border: 1px solid var(--binca-grid);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+
+        .cell::after {
+            content: '';
+            width: 15%;
+            height: 15%;
+            background: var(--hole-color);
+            border-radius: 50%;
+            position: absolute;
+            z-index: 1;
+        }
+
+        .straight-stitch-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            pointer-events: none; 
+        }
+
+        .control-panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        .color-swatch {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #e2e8f0;
+            transition: transform 0.1s;
+        }
+
+        .color-swatch.active {
+            border-color: #3b82f6;
+            transform: scale(1.1);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+        }
+
+        .btn-mode.active {
+            background-color: #2563eb !important;
+            color: white !important;
+        }
+
+        @media (max-width: 1024px) {
+            #sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                z-index: 50;
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+                width: 280px;
+                padding: 1rem;
+                background: #f8fafc;
+                box-shadow: 4px 0 15px rgba(0,0,0,0.1);
+            }
+            #sidebar.open {
+                transform: translateX(0);
+            }
+            #sidebar-overlay {
+                display: none;
+            }
+            #sidebar-overlay.open {
+                display: block;
+                position: fixed;
+                inset: 0;
+                background: rgba(0,0,0,0.3);
+                z-index: 40;
+            }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="p-2 md:p-4 h-screen flex flex-col">
+    <div id="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+    <div class="max-w-[1600px] mx-auto w-full h-full flex flex-col overflow-hidden">
+        <header class="mb-2 flex justify-between items-center flex-shrink-0">
+            <div class="flex items-center gap-3">
+                <button onclick="toggleSidebar()" class="lg:hidden p-2 bg-white rounded-lg shadow border border-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
+                <div>
+                    <h1 class="text-lg md:text-xl font-bold text-slate-800 leading-tight">Binca Planner</h1>
+                    <p id="current-project-name" class="text-[9px] text-slate-500 font-mono">Untitled Project</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                 <button id="undo-btn" class="p-2 bg-white rounded-lg shadow border border-slate-200 text-slate-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
+                </button>
+            </div>
+        </header>
+
+        <div class="flex gap-4 flex-grow overflow-hidden relative">
+            <aside id="sidebar" class="lg:w-72 flex-shrink-0 flex flex-col gap-3 overflow-y-auto custom-scrollbar">
+                <div class="control-panel p-4 border-b-4 border-blue-500">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="font-bold text-slate-700 text-xs uppercase tracking-wider">Project</h2>
+                        <button id="new-project-btn" class="text-[10px] text-blue-600 font-bold px-2 py-1 bg-blue-50 rounded">NEW</button>
+                    </div>
+                    <div class="space-y-3">
+                        <input type="text" id="project-name-input" placeholder="Pattern Name" class="w-full text-xs p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="save-local-btn" class="py-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold">Save To...</button>
+                            <button id="open-local-btn" class="py-2 bg-slate-800 text-white rounded-lg text-[10px] font-bold">Open</button>
+                            <input type="file" id="file-input" class="hidden" accept=".binca">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-panel p-4">
+                    <h2 class="font-bold mb-3 text-slate-700 text-xs uppercase tracking-wider">Tools</h2>
+                    <div class="grid grid-cols-2 gap-2 mb-4">
+                        <button id="mode-straight" class="btn-mode py-2.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold active">Stitch</button>
+                        <button id="mode-eraser" class="btn-mode py-2.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold">Eraser</button>
+                    </div>
+
+                    <label class="text-[9px] font-bold text-slate-400 uppercase mb-2 block">Thread</label>
+                    <div class="grid grid-cols-5 gap-2 mb-3" id="color-palette"></div>
+                    
+                    <div class="flex items-center gap-2">
+                        <input type="color" id="custom-color" class="w-8 h-8 rounded-full border-2 border-slate-200 overflow-hidden" value="#ff0000">
+                        <span class="text-[10px] text-slate-500 font-medium">Custom</span>
+                    </div>
+                </div>
+
+                <div class="control-panel p-4 bg-slate-50">
+                    <h2 class="font-bold mb-3 text-slate-700 text-xs uppercase tracking-wider">Grid Size</h2>
+                    <div class="grid grid-cols-2 gap-2 mb-3">
+                        <input type="number" id="input-rows" value="20" class="border rounded-lg p-2 text-sm text-center">
+                        <input type="number" id="input-cols" value="20" class="border rounded-lg p-2 text-sm text-center">
+                    </div>
+                    <button id="apply-grid" class="w-full py-2 bg-slate-200 text-slate-800 rounded-lg text-xs font-bold">Update Grid</button>
+                </div>
+                
+                <button id="export-btn" class="w-full py-3 bg-white text-slate-700 border-2 border-slate-200 rounded-xl font-bold">Export PNG</button>
+            </aside>
+
+            <main class="flex-grow flex flex-col relative overflow-hidden bg-slate-300 rounded-xl border border-slate-400">
+                <div id="grid-viewport" tabindex="0">
+                    <div id="canvas-transform-layer">
+                        <div id="grid-container" class="binca-grid"></div>
+                        <svg id="svg-layer" class="straight-stitch-svg"></svg>
+                    </div>
+                </div>
+                
+                <div class="flex justify-between items-center px-3 py-1.5 bg-white border-t border-slate-200 flex-shrink-0">
+                    <div class="flex items-center gap-3">
+                        <button id="center-view" class="text-[10px] text-blue-600 font-bold uppercase">Center</button>
+                        <span id="zoom-percent" class="text-[10px] font-bold text-slate-500">100%</span>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <canvas id="export-canvas" class="hidden"></canvas>
+
+    <script>
+        const viewport = document.getElementById('grid-viewport');
+        const transformLayer = document.getElementById('canvas-transform-layer');
+        const gridContainer = document.getElementById('grid-container');
+        const svgLayer = document.getElementById('svg-layer');
+        const colorPalette = document.getElementById('color-palette');
+        const customColorInput = document.getElementById('custom-color');
+        const applyBtn = document.getElementById('apply-grid');
+        const exportBtn = document.getElementById('export-btn');
+        const zoomLabel = document.getElementById('zoom-percent');
+        const centerBtn = document.getElementById('center-view');
+        const undoBtn = document.getElementById('undo-btn');
+        
+        const saveLocalBtn = document.getElementById('save-local-btn');
+        const openLocalBtn = document.getElementById('open-local-btn');
+        const newProjectBtn = document.getElementById('new-project-btn');
+        const fileInput = document.getElementById('file-input');
+        const projectNameInput = document.getElementById('project-name-input');
+        const currentProjectDisplay = document.getElementById('current-project-name');
+
+        const modes = { STRAIGHT: 'straight', ERASER: 'eraser' };
+        let currentMode = modes.STRAIGHT;
+        let currentColor = '#ff0000';
+        let numRows = 20;
+        let numCols = 20;
+        const baseCellSize = 40;
+        
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        
+        let isMouseDown = false;
+        let isPanning = false;
+        let lastTouchPos = { x: 0, y: 0 };
+        let dragStartCell = null;
+        let tempLine = null;
+        let initialPinchDistance = 0;
+        
+        let lines = [];
+        let historyStack = [];
+
+        const presetColors = ['#ff0000', '#ffa500', '#ffff00', '#008000', '#0000ff', '#800080', '#000000', '#ffffff', '#a52a2a', '#ffc0cb'];
+
+        function init() {
+            createPalette();
+            renderGrid();
+            setupListeners();
+            window.addEventListener('load', () => setTimeout(centerGrid, 200));
+            updateUndoState();
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('sidebar-overlay').classList.toggle('open');
+        }
+
+        function createPalette() {
+            colorPalette.innerHTML = '';
+            presetColors.forEach(color => {
+                const div = document.createElement('div');
+                div.className = `color-swatch ${color.toLowerCase() === currentColor.toLowerCase() ? 'active' : ''}`;
+                div.style.backgroundColor = color;
+                div.onclick = () => {
+                    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+                    div.classList.add('active');
+                    currentColor = color;
+                    customColorInput.value = color;
+                    if (currentMode === modes.ERASER) setMode(modes.STRAIGHT);
+                };
+                colorPalette.appendChild(div);
+            });
+        }
+
+        function updateTransform() {
+            transformLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+            zoomLabel.innerText = `${Math.round(scale * 100)}%`;
+        }
+
+        function centerGrid() {
+            const vw = viewport.clientWidth;
+            const vh = viewport.clientHeight;
+            if (vw === 0 || vh === 0) return;
+            const gw = numCols * baseCellSize;
+            const gh = numRows * baseCellSize;
+            scale = Math.min((vw * 0.9) / gw, (vh * 0.9) / gh, 1.2);
+            panX = (vw - gw * scale) / 2;
+            panY = (vh - gh * scale) / 2;
+            updateTransform();
+        }
+
+        function renderGrid() {
+            const totalWidth = baseCellSize * numCols;
+            const totalHeight = baseCellSize * numRows;
+            gridContainer.style.width = `${totalWidth}px`;
+            gridContainer.style.height = `${totalHeight}px`;
+            gridContainer.style.gridTemplateColumns = `repeat(${numCols}, ${baseCellSize}px)`;
+            gridContainer.innerHTML = '';
+            
+            svgLayer.setAttribute('width', totalWidth);
+            svgLayer.setAttribute('height', totalHeight);
+            svgLayer.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+            svgLayer.style.width = `${totalWidth}px`;
+            svgLayer.style.height = `${totalHeight}px`;
+
+            for (let r = 0; r < numRows; r++) {
+                for (let c = 0; c < numCols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.style.width = `${baseCellSize}px`;
+                    cell.style.height = `${baseCellSize}px`;
+                    gridContainer.appendChild(cell);
+                }
+            }
+            drawLines();
+        }
+
+        function getCenter(r, c) {
+            return { x: (c * baseCellSize) + (baseCellSize / 2), y: (r * baseCellSize) + (baseCellSize / 2) };
+        }
+
+        function getPointerGridPos(e) {
+            const rect = gridContainer.getBoundingClientRect();
+            const touch = e.touches ? e.touches[0] : e;
+            const x = (touch.clientX - rect.left) / scale;
+            const y = (touch.clientY - rect.top) / scale;
+            return { c: Math.floor(x / baseCellSize), r: Math.floor(y / baseCellSize), rawX: x, rawY: y };
+        }
+
+        async function saveProject() {
+            const data = JSON.stringify({ 
+                name: projectNameInput.value || 'Untitled', 
+                numRows, 
+                numCols, 
+                lines 
+            }, null, 2);
+            
+            const fileName = (projectNameInput.value || 'pattern') + '.binca';
+
+            // 1. Check for iPad/iOS Share API support (best way to get "Save to Files" prompt)
+            if (navigator.share && /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                try {
+                    const file = new File([data], fileName, { type: 'application/json' });
+                    await navigator.share({
+                        files: [file],
+                        title: fileName
+                    });
+                    return;
+                } catch (err) {
+                    console.warn("Share failed, falling back...", err);
+                }
+            }
+
+            // 2. Try modern File System Access API (Desktop Chrome/Edge)
+            if (window.showSaveFilePicker) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: fileName,
+                        types: [{
+                            description: 'Binca Planner File',
+                            accept: { 'application/json': ['.binca'] },
+                        }],
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(data);
+                    await writable.close();
+                    return;
+                } catch (err) {
+                    if (err.name === 'AbortError') return;
+                    console.warn("Picker failed, trying fallback...", err);
+                }
+            }
+
+            // 3. Last Resort Fallback (Generic Download)
+            const blob = new Blob([data], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 500);
+        }
+
+        function setupListeners() {
+            newProjectBtn.onclick = () => {
+                if(confirm("Start a new project? This will clear the current canvas.")) { 
+                    lines = []; historyStack = []; drawLines(); centerGrid(); updateUndoState(); 
+                }
+            };
+
+            saveLocalBtn.onclick = saveProject;
+
+            openLocalBtn.onclick = () => fileInput.click();
+            fileInput.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        numRows = data.numRows || 20;
+                        numCols = data.numCols || 20;
+                        lines = data.lines || [];
+                        projectNameInput.value = data.name || '';
+                        currentProjectDisplay.innerText = data.name || 'Untitled Project';
+                        document.getElementById('input-rows').value = numRows;
+                        document.getElementById('input-cols').value = numCols;
+                        renderGrid(); centerGrid();
+                    } catch (err) { console.error("File error", err); }
+                };
+                reader.readAsText(file);
+            };
+
+            centerBtn.onclick = centerGrid;
+            undoBtn.onclick = () => {
+                if (historyStack.length) { lines = JSON.parse(historyStack.pop()); drawLines(); updateUndoState(); }
+            };
+
+            viewport.addEventListener('touchstart', (e) => {
+                if (e.touches.length >= 2) {
+                    isPanning = true; isMouseDown = false; dragStartCell = null;
+                    if (tempLine) { tempLine.remove(); tempLine = null; }
+                    initialPinchDistance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    lastTouchPos = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                } else if (e.touches.length === 1 && !isPanning) {
+                    isMouseDown = true;
+                    const pos = getPointerGridPos(e);
+                    if (pos.r >= 0 && pos.r < numRows && pos.c >= 0 && pos.c < numCols) {
+                        dragStartCell = pos;
+                        if (currentMode === modes.ERASER) checkEraserHit(pos.rawX, pos.rawY);
+                    }
+                }
+            }, { passive: false });
+
+            viewport.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (e.touches.length >= 2) {
+                    const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                    const currentPos = { x: (e.touches[0].clientX + e.touches[1].clientX) / 2, y: (e.touches[0].clientY + e.touches[1].clientY) / 2 };
+                    if (initialPinchDistance > 0) { handleZoom(currentDist / initialPinchDistance, currentPos.x, currentPos.y); initialPinchDistance = currentDist; }
+                    panX += currentPos.x - lastTouchPos.x; panY += currentPos.y - lastTouchPos.y;
+                    lastTouchPos = currentPos; updateTransform();
+                } else if (e.touches.length === 1 && isMouseDown && dragStartCell && !isPanning) {
+                    const pos = getPointerGridPos(e);
+                    if (currentMode === modes.STRAIGHT) updateTempLine(Math.max(0, Math.min(numRows - 1, pos.r)), Math.max(0, Math.min(numCols - 1, pos.c)));
+                    else checkEraserHit(pos.rawX, pos.rawY);
+                }
+            }, { passive: false });
+
+            viewport.addEventListener('touchend', (e) => {
+                if (isMouseDown && dragStartCell && currentMode === modes.STRAIGHT && !isPanning) {
+                    const pos = getPointerGridPos(e.changedTouches[0]);
+                    if (pos.r >= 0 && pos.r < numRows && pos.c >= 0 && pos.c < numCols) {
+                        if (pos.r !== dragStartCell.r || pos.c !== dragStartCell.c) {
+                            historyStack.push(JSON.stringify(lines));
+                            lines.push({ r1: dragStartCell.r, c1: dragStartCell.c, r2: pos.r, c2: pos.c, color: currentColor });
+                        }
+                    }
+                }
+                if (e.touches.length === 0) { isMouseDown = false; isPanning = false; dragStartCell = null; if (tempLine) { tempLine.remove(); tempLine = null; } }
+                drawLines(); updateUndoState();
+            });
+
+            applyBtn.onclick = () => {
+                numRows = parseInt(document.getElementById('input-rows').value);
+                numCols = parseInt(document.getElementById('input-cols').value);
+                lines = []; historyStack = []; renderGrid(); centerGrid(); updateUndoState();
+            };
+
+            exportBtn.onclick = downloadChart;
+            document.getElementById('mode-straight').onclick = () => setMode(modes.STRAIGHT);
+            document.getElementById('mode-eraser').onclick = () => setMode(modes.ERASER);
+        }
+
+        function handleZoom(factor, centerX, centerY) {
+            const newScale = Math.min(Math.max(scale * factor, 0.2), 4);
+            const actualFactor = newScale / scale;
+            const rect = viewport.getBoundingClientRect();
+            const relX = centerX - rect.left; const relY = centerY - rect.top;
+            panX = relX - (relX - panX) * actualFactor; panY = relY - (relY - panY) * actualFactor;
+            scale = newScale; updateTransform();
+        }
+
+        function checkEraserHit(rawX, rawY) {
+            const hitThreshold = 15;
+            const index = lines.findIndex(l => {
+                const p1 = getCenter(l.r1, l.c1), p2 = getCenter(l.r2, l.c2);
+                const dx = p2.x - p1.x, dy = p2.y - p1.y, lenSq = dx * dx + dy * dy;
+                if (lenSq === 0) return false;
+                let t = Math.max(0, Math.min(1, ((rawX - p1.x) * dx + (rawY - p1.y) * dy) / lenSq));
+                return ((rawX - (p1.x + t * dx)) ** 2 + (rawY - (p1.y + t * dy)) ** 2) < (hitThreshold ** 2);
+            });
+            if (index !== -1) { historyStack.push(JSON.stringify(lines)); lines.splice(index, 1); drawLines(); updateUndoState(); }
+        }
+
+        function updateTempLine(r, c) {
+            if (tempLine) tempLine.remove();
+            const start = getCenter(dragStartCell.r, dragStartCell.c), end = getCenter(r, c);
+            tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            tempLine.setAttribute('x1', start.x); tempLine.setAttribute('y1', start.y);
+            tempLine.setAttribute('x2', end.x); tempLine.setAttribute('y2', end.y);
+            tempLine.setAttribute('stroke', currentColor); tempLine.setAttribute('stroke-width', '6');
+            tempLine.setAttribute('stroke-linecap', 'round'); tempLine.setAttribute('opacity', '0.5');
+            svgLayer.appendChild(tempLine);
+        }
+
+        function drawLines() {
+            svgLayer.innerHTML = '';
+            lines.forEach((line) => {
+                const start = getCenter(line.r1, line.c1), end = getCenter(line.r2, line.c2);
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', start.x); l.setAttribute('y1', start.y);
+                l.setAttribute('x2', end.x); l.setAttribute('y2', end.y);
+                l.setAttribute('stroke', line.color); l.setAttribute('stroke-width', '6');
+                l.setAttribute('stroke-linecap', 'round');
+                if (currentMode === modes.ERASER) { l.setAttribute('opacity', '0.3'); l.setAttribute('stroke-width', '10'); }
+                svgLayer.appendChild(l);
+            });
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('active'));
+            document.getElementById(`mode-${mode}`).classList.add('active');
+            drawLines();
+        }
+
+        function updateUndoState() {
+            undoBtn.style.opacity = historyStack.length ? '1' : '0.3';
+            undoBtn.style.pointerEvents = historyStack.length ? 'auto' : 'none';
+        }
+
+        async function downloadChart() {
+            const canvas = document.getElementById('export-canvas');
+            const ctx = canvas.getContext('2d');
+            const s = 40;
+            canvas.width = numCols * s; canvas.height = numRows * s;
+            ctx.fillStyle = '#fdf5e6'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#f0e6d2';
+            for(let i=0; i<=numCols; i++) { ctx.beginPath(); ctx.moveTo(i*s, 0); ctx.lineTo(i*s, canvas.height); ctx.stroke(); }
+            for(let i=0; i<=numRows; i++) { ctx.beginPath(); ctx.moveTo(0, i*s); ctx.lineTo(canvas.width, i*s); ctx.stroke(); }
+            lines.forEach(l => {
+                ctx.strokeStyle = l.color; ctx.lineWidth = 6; ctx.lineCap = 'round';
+                ctx.beginPath(); ctx.moveTo(l.c1*s+s/2, l.r1*s+s/2); ctx.lineTo(l.c2*s+s/2, l.r2*s+s/2); ctx.stroke();
+            });
+            
+            const fileName = (projectNameInput.value || 'binca_design') + '.png';
+            const dataUrl = canvas.toDataURL('image/png');
+
+            // Trigger Share Sheet for Image on iPad
+            if (navigator.share && /iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                try {
+                    const blob = await (await fetch(dataUrl)).blob();
+                    const file = new File([blob], fileName, { type: 'image/png' });
+                    await navigator.share({ files: [file], title: fileName });
+                    return;
+                } catch (e) { console.warn(e); }
+            }
+
+            const link = document.createElement('a');
+            link.download = fileName;
+            link.href = dataUrl;
+            link.click();
+        }
+
+        init();
+    </script>
+</body>
+</html>
