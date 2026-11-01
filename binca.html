@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Binca Stitch Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --binca-bg: #fdf5e6; 
+            --binca-grid: #f0e6d2;
+            --hole-color: #d7ccc8;
+        }
+
+        body {
+            background-color: #f0f2f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; 
+            touch-action: none;
+        }
+
+        #grid-viewport {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #cbd5e1;
+            position: relative;
+            cursor: crosshair;
+            border-radius: 12px;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.1);
+            outline: none;
+        }
+        
+        #grid-viewport.panning-ready { cursor: grab; }
+        #grid-viewport.grabbing { cursor: grabbing !important; }
+
+        #canvas-transform-layer {
+            position: absolute;
+            transform-origin: 0 0;
+            will-change: transform;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .binca-grid {
+            display: grid;
+            background-color: var(--binca-bg);
+            border: 2px solid #e2e8f0;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.15);
+            user-select: none;
+            touch-action: none;
+            position: relative;
+        }
+
+        .cell {
+            border: 1px solid var(--binca-grid);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+
+        .cell::after {
+            content: '';
+            width: 15%;
+            height: 15%;
+            background: var(--hole-color);
+            border-radius: 50%;
+            position: absolute;
+            z-index: 1;
+        }
+
+        .straight-stitch-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 10;
+            pointer-events: none; 
+        }
+
+        .control-panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            flex-shrink: 0;
+        }
+
+        .color-swatch {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #e2e8f0;
+            transition: transform 0.1s;
+        }
+
+        .color-swatch.active {
+            border-color: #3b82f6;
+            transform: scale(1.1);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+        }
+
+        .btn-mode.active {
+            background-color: #2563eb !important;
+            color: white !important;
+        }
+
+        #dynamic-accent-bar {
+            height: 3px;
+            width: 100%;
+            border-radius: 10px;
+            transition: background-color 0.3s ease;
+        }
+
+        /* Fullscreen styles */
+        :fullscreen #grid-viewport {
+            border-radius: 0;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="p-2 md:p-4 h-screen flex flex-col">
+    <div class="max-w-[1600px] mx-auto w-full flex-grow flex flex-col overflow-hidden" id="main-app-container">
+        <header class="mb-3 flex justify-between items-center flex-shrink-0">
+            <div>
+                <h1 class="text-xl font-bold text-slate-800">Binca Stitch Planner</h1>
+                <p id="current-project-name" class="text-[10px] text-slate-500 font-mono italic">Untitled Project</p>
+            </div>
+            <div id="save-status" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-white px-2 py-1 rounded border">Local Drive Storage</div>
+        </header>
+
+        <div class="flex flex-col lg:flex-row gap-4 flex-grow overflow-hidden">
+            <div class="lg:w-72 flex-shrink-0 flex flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
+                
+                <!-- Project Section -->
+                <div class="control-panel p-4 border-b-4 border-blue-500">
+                    <div class="flex justify-between items-start mb-3">
+                        <h2 class="font-bold text-slate-700 text-xs uppercase tracking-wider flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                            Project
+                        </h2>
+                    </div>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-[9px] font-bold text-slate-400 uppercase mb-1 block">Filename</label>
+                            <input type="text" id="project-name-input" placeholder="my_pattern" class="w-full text-xs p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button id="save-local-btn" class="py-2 bg-blue-600 text-white rounded-lg text-[11px] font-bold hover:bg-blue-700 transition-all">Save .binca</button>
+                            <button id="open-local-btn" class="py-2 bg-slate-800 text-white rounded-lg text-[11px] font-bold hover:bg-slate-900 transition-all">Open File</button>
+                            <input type="file" id="file-input" class="hidden" accept=".binca">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tools Section -->
+                <div class="control-panel p-4">
+                    <h2 class="font-bold mb-3 text-slate-700 text-xs uppercase tracking-wider">Design Tools</h2>
+                    <div class="grid grid-cols-2 gap-2 mb-3">
+                        <button id="mode-straight" class="btn-mode py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold active">Stitch</button>
+                        <button id="mode-eraser" class="btn-mode py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold text-rose-600">Eraser</button>
+                    </div>
+
+                    <button id="undo-btn" class="w-full py-2 mb-4 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 hover:bg-amber-100 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                        Undo
+                    </button>
+
+                    <label class="text-[9px] font-bold text-slate-400 uppercase mb-2 block">Thread Color</label>
+                    <div class="grid grid-cols-5 gap-2 mb-3" id="color-palette"></div>
+                    
+                    <div class="flex items-center gap-2 mt-2">
+                        <input type="color" id="custom-color" class="w-8 h-8 rounded-full cursor-pointer border-2 border-slate-200 overflow-hidden" value="#ff0000">
+                        <span class="text-[10px] text-slate-500 font-medium">Custom Picker</span>
+                    </div>
+                    <div id="dynamic-accent-bar" class="mt-4"></div>
+                </div>
+
+                <!-- Grid Settings Section -->
+                <div class="control-panel p-4 bg-slate-50 border border-slate-200">
+                    <h2 class="font-bold mb-3 text-slate-700 text-xs uppercase tracking-wider">Grid Settings</h2>
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                        <div class="flex flex-col">
+                            <label class="text-[9px] font-bold text-slate-400 mb-1 uppercase">Rows</label>
+                            <input type="number" id="input-rows" value="20" min="1" max="100" class="border rounded-lg p-2 text-sm text-center focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="text-[9px] font-bold text-slate-400 mb-1 uppercase">Cols</label>
+                            <input type="number" id="input-cols" value="20" min="1" max="100" class="border rounded-lg p-2 text-sm text-center focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                    </div>
+                    <button id="apply-grid" class="w-full py-2.5 bg-slate-200 text-slate-800 rounded-lg text-xs font-bold hover:bg-slate-300 transition-colors">
+                        Update Grid Size
+                    </button>
+                </div>
+                
+                <button id="export-btn" class="w-full py-3 bg-white text-slate-700 border-2 border-slate-200 rounded-xl font-bold hover:border-slate-400 flex items-center justify-center gap-2 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    Export PNG
+                </button>
+            </div>
+
+            <!-- Main Canvas Area -->
+            <div class="flex-grow flex flex-col relative overflow-hidden bg-slate-200 rounded-xl border-4 border-slate-300">
+                <div id="grid-viewport" tabindex="0">
+                    <div id="canvas-transform-layer">
+                        <div id="grid-container" class="binca-grid"></div>
+                        <svg id="svg-layer" class="straight-stitch-svg"></svg>
+                    </div>
+                </div>
+                
+                <div class="flex justify-between items-center px-4 py-2 bg-white border-t border-slate-200 flex-shrink-0">
+                    <div class="flex items-center gap-6">
+                        <button id="center-view" class="text-[11px] text-blue-600 font-bold uppercase hover:text-blue-800 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><circle cx="12" cy="12" r="3"/></svg>
+                            Center
+                        </button>
+                        <button id="fullscreen-toggle" class="text-[11px] text-slate-600 font-bold uppercase hover:text-slate-900 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+                            Full Screen
+                        </button>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-slate-400 font-bold uppercase">Zoom</span>
+                            <span id="zoom-percent" class="text-[11px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">100%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="export-canvas" class="hidden"></canvas>
+
+    <script>
+        const viewport = document.getElementById('grid-viewport');
+        const transformLayer = document.getElementById('canvas-transform-layer');
+        const gridContainer = document.getElementById('grid-container');
+        const svgLayer = document.getElementById('svg-layer');
+        const colorPalette = document.getElementById('color-palette');
+        const customColorInput = document.getElementById('custom-color');
+        const applyBtn = document.getElementById('apply-grid');
+        const exportBtn = document.getElementById('export-btn');
+        const zoomLabel = document.getElementById('zoom-percent');
+        const centerBtn = document.getElementById('center-view');
+        const undoBtn = document.getElementById('undo-btn');
+        const accentBar = document.getElementById('dynamic-accent-bar');
+        const fullscreenBtn = document.getElementById('fullscreen-toggle');
+        
+        const saveLocalBtn = document.getElementById('save-local-btn');
+        const openLocalBtn = document.getElementById('open-local-btn');
+        const fileInput = document.getElementById('file-input');
+        const projectNameInput = document.getElementById('project-name-input');
+        const currentProjectDisplay = document.getElementById('current-project-name');
+        const saveStatus = document.getElementById('save-status');
+
+        const modes = { STRAIGHT: 'straight', ERASER: 'eraser' };
+        let currentMode = modes.STRAIGHT;
+        let currentColor = '#ff0000';
+        let numRows = 20;
+        let numCols = 20;
+        const baseCellSize = 40;
+        
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        
+        let isMouseDown = false;
+        let isPanning = false;
+        let spacePressed = false;
+        let lastMousePos = { x: 0, y: 0 };
+        let dragStartCell = null;
+        let tempLine = null;
+        
+        let lines = [];
+        let historyStack = [];
+
+        const presetColors = ['#ff0000', '#ffa500', '#ffff00', '#008000', '#0000ff', '#800080', '#000000', '#ffffff', '#a52a2a', '#ffc0cb'];
+
+        function init() {
+            createPalette();
+            renderGrid();
+            setupListeners();
+            setTimeout(centerGrid, 100); 
+            updateUndoState();
+            updateAccentColor();
+        }
+
+        function saveLocal() {
+            const rawName = projectNameInput.value.trim() || 'my_binca_pattern';
+            const fileName = rawName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const data = { name: rawName, numRows, numCols, lines, savedAt: new Date().toISOString() };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url; link.download = `${fileName}.binca`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            currentProjectDisplay.innerText = rawName || 'Untitled Project';
+            saveStatus.innerText = "Saved to Downloads";
+            setTimeout(() => saveStatus.innerText = "Local Drive Storage", 2000);
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (data.numRows && data.numCols && Array.isArray(data.lines)) {
+                        numRows = data.numRows; numCols = data.numCols; lines = data.lines;
+                        projectNameInput.value = data.name || '';
+                        currentProjectDisplay.innerText = data.name || 'Untitled Project';
+                        document.getElementById('input-rows').value = numRows;
+                        document.getElementById('input-cols').value = numCols;
+                        renderGrid(); centerGrid(); historyStack = []; updateUndoState();
+                        saveStatus.innerText = "Loaded: " + file.name;
+                        setTimeout(() => saveStatus.innerText = "Local Drive Storage", 3000);
+                    }
+                } catch (err) { alert("Invalid .binca file."); }
+            };
+            reader.readAsText(file);
+            e.target.value = ''; 
+        }
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                viewport.requestFullscreen().catch(err => console.log(err));
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function pushHistory() {
+            historyStack.push(JSON.stringify(lines));
+            if (historyStack.length > 50) historyStack.shift();
+            updateUndoState();
+        }
+
+        function undo() {
+            if (historyStack.length > 0) {
+                const prevState = historyStack.pop();
+                lines = JSON.parse(prevState);
+                drawLines();
+                updateUndoState();
+            }
+        }
+
+        function updateUndoState() {
+            undoBtn.disabled = historyStack.length === 0;
+            undoBtn.style.opacity = historyStack.length === 0 ? '0.5' : '1';
+        }
+
+        function updateAccentColor() {
+            accentBar.style.backgroundColor = currentColor;
+        }
+
+        function createPalette() {
+            colorPalette.innerHTML = '';
+            presetColors.forEach(color => {
+                const div = document.createElement('div');
+                div.className = `color-swatch ${color.toLowerCase() === currentColor.toLowerCase() ? 'active' : ''}`;
+                div.style.backgroundColor = color;
+                div.onclick = () => {
+                    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+                    div.classList.add('active');
+                    currentColor = color;
+                    customColorInput.value = color;
+                    updateAccentColor();
+                    if (currentMode === modes.ERASER) setMode(modes.STRAIGHT);
+                };
+                colorPalette.appendChild(div);
+            });
+        }
+
+        function updateTransform() {
+            transformLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+            zoomLabel.innerText = `${Math.round(scale * 100)}%`;
+        }
+
+        function centerGrid() {
+            const vw = viewport.clientWidth;
+            const vh = viewport.clientHeight;
+            if (vw === 0 || vh === 0) return;
+            const gw = numCols * baseCellSize;
+            const gh = numRows * baseCellSize;
+            scale = Math.min((vw * 0.85) / gw, (vh * 0.85) / gh, 1.5);
+            panX = (vw - gw * scale) / 2;
+            panY = (vh - gh * scale) / 2;
+            updateTransform();
+        }
+
+        function renderGrid() {
+            const totalWidth = baseCellSize * numCols;
+            const totalHeight = baseCellSize * numRows;
+            gridContainer.style.width = `${totalWidth}px`;
+            gridContainer.style.height = `${totalHeight}px`;
+            gridContainer.style.gridTemplateColumns = `repeat(${numCols}, ${baseCellSize}px)`;
+            gridContainer.style.gridTemplateRows = `repeat(${numRows}, ${baseCellSize}px)`;
+            gridContainer.innerHTML = '';
+            
+            // Synchronize SVG size with grid size
+            svgLayer.setAttribute('width', totalWidth);
+            svgLayer.setAttribute('height', totalHeight);
+            svgLayer.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+            svgLayer.style.width = `${totalWidth}px`;
+            svgLayer.style.height = `${totalHeight}px`;
+
+            const fragment = document.createDocumentFragment();
+            for (let r = 0; r < numRows; r++) {
+                for (let c = 0; c < numCols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.style.width = `${baseCellSize}px`;
+                    cell.style.height = `${baseCellSize}px`;
+                    cell.dataset.r = r; cell.dataset.c = c;
+                    fragment.appendChild(cell);
+                }
+            }
+            gridContainer.appendChild(fragment);
+            drawLines();
+        }
+
+        function getCenter(r, c) {
+            return { x: (c * baseCellSize) + (baseCellSize / 2), y: (r * baseCellSize) + (baseCellSize / 2) };
+        }
+
+        function getMouseGridPos(e) {
+            const rect = gridContainer.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const x = (clientX - rect.left) / scale;
+            const y = (clientY - rect.top) / scale;
+            return { c: Math.floor(x / baseCellSize), r: Math.floor(y / baseCellSize) };
+        }
+
+        function setupListeners() {
+            saveLocalBtn.addEventListener('click', saveLocal);
+            openLocalBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', handleFileSelect);
+            fullscreenBtn.addEventListener('click', toggleFullScreen);
+            centerBtn.addEventListener('click', centerGrid);
+            undoBtn.addEventListener('click', undo);
+
+            customColorInput.addEventListener('input', (e) => {
+                currentColor = e.target.value;
+                document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+                updateAccentColor();
+            });
+
+            window.addEventListener('keydown', (e) => { 
+                if (e.code === 'Space') { 
+                    spacePressed = true; viewport.classList.add('panning-ready'); e.preventDefault(); 
+                } 
+            });
+            window.addEventListener('keyup', (e) => { 
+                if (e.code === 'Space') { spacePressed = false; isPanning = false; viewport.classList.remove('panning-ready', 'grabbing'); } 
+            });
+
+            viewport.addEventListener('mousedown', (e) => {
+                lastMousePos = { x: e.clientX, y: e.clientY };
+                if (spacePressed || e.button === 1) { isPanning = true; viewport.classList.add('grabbing'); return; }
+                isMouseDown = true;
+                const pos = getMouseGridPos(e);
+                if (pos.r >= 0 && pos.r < numRows && pos.c >= 0 && pos.c < numCols) dragStartCell = pos;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (isPanning) {
+                    panX += e.clientX - lastMousePos.x; panY += e.clientY - lastMousePos.y; updateTransform();
+                } else if (isMouseDown && dragStartCell && currentMode === modes.STRAIGHT && !spacePressed) {
+                    const pos = getMouseGridPos(e);
+                    updateTempLine(Math.max(0, Math.min(numRows - 1, pos.r)), Math.max(0, Math.min(numCols - 1, pos.c)));
+                }
+                lastMousePos = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mouseup', (e) => {
+                if (isPanning) { isPanning = false; viewport.classList.remove('grabbing'); } 
+                else if (isMouseDown && dragStartCell && !spacePressed) {
+                    const pos = getMouseGridPos(e);
+                    if (pos.r >= 0 && pos.r < numRows && pos.c >= 0 && pos.c < numCols) {
+                        if (pos.r !== dragStartCell.r || pos.c !== dragStartCell.c) {
+                            pushHistory();
+                            lines.push({ r1: dragStartCell.r, c1: dragStartCell.c, r2: pos.r, c2: pos.c, color: currentColor });
+                        }
+                    }
+                }
+                isMouseDown = false; dragStartCell = null;
+                if (tempLine) { tempLine.remove(); tempLine = null; }
+                drawLines();
+            });
+
+            viewport.addEventListener('wheel', (e) => { e.preventDefault(); handleZoom(e.deltaY > 0 ? 0.9 : 1.1, e.clientX, e.clientY); }, { passive: false });
+            
+            document.getElementById('mode-straight').addEventListener('click', () => setMode(modes.STRAIGHT));
+            document.getElementById('mode-eraser').addEventListener('click', () => setMode(modes.ERASER));
+            
+            applyBtn.addEventListener('click', () => {
+                const rowsVal = parseInt(document.getElementById('input-rows').value);
+                const colsVal = parseInt(document.getElementById('input-cols').value);
+                if (!isNaN(rowsVal) && !isNaN(colsVal) && rowsVal > 0 && colsVal > 0) {
+                    if (lines.length === 0 || confirm(`Resize grid? This clears current work.`)) {
+                        numRows = Math.min(rowsVal, 100); numCols = Math.min(colsVal, 100);
+                        lines = []; historyStack = [];
+                        renderGrid(); centerGrid(); updateUndoState();
+                    }
+                }
+            });
+
+            exportBtn.addEventListener('click', downloadChart);
+            window.addEventListener('resize', () => { setTimeout(centerGrid, 100); });
+        }
+
+        function handleZoom(factor, centerX, centerY) {
+            const newScale = Math.min(Math.max(scale * factor, 0.1), 5);
+            const actualFactor = newScale / scale;
+            const rect = viewport.getBoundingClientRect();
+            const relX = centerX - rect.left; const relY = centerY - rect.top;
+            panX = relX - (relX - panX) * actualFactor;
+            panY = relY - (relY - panY) * actualFactor;
+            scale = newScale; updateTransform();
+        }
+
+        function updateTempLine(r, c) {
+            if (tempLine) tempLine.remove();
+            const start = getCenter(dragStartCell.r, dragStartCell.c);
+            const end = getCenter(r, c);
+            tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            tempLine.setAttribute('x1', start.x); tempLine.setAttribute('y1', start.y);
+            tempLine.setAttribute('x2', end.x); tempLine.setAttribute('y2', end.y);
+            tempLine.setAttribute('stroke', currentColor); tempLine.setAttribute('stroke-width', (baseCellSize * 0.15).toString());
+            tempLine.setAttribute('stroke-linecap', 'round'); tempLine.setAttribute('opacity', '0.5');
+            svgLayer.appendChild(tempLine);
+        }
+
+        function drawLines() {
+            // Remove existing lines from the DOM
+            svgLayer.querySelectorAll('.persistent-line-group').forEach(g => g.remove());
+            
+            lines.forEach((line, index) => {
+                const start = getCenter(line.r1, line.c1);
+                const end = getCenter(line.r2, line.c2);
+                const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                group.setAttribute('class', 'persistent-line-group');
+                const hitArea = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                hitArea.setAttribute('x1', start.x); hitArea.setAttribute('y1', start.y);
+                hitArea.setAttribute('x2', end.x); hitArea.setAttribute('y2', end.y);
+                hitArea.setAttribute('stroke', 'transparent'); hitArea.setAttribute('stroke-width', (baseCellSize * 0.5).toString());
+                hitArea.setAttribute('stroke-linecap', 'round');
+                const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                l.setAttribute('x1', start.x); l.setAttribute('y1', start.y);
+                l.setAttribute('x2', end.x); l.setAttribute('y2', end.y);
+                l.setAttribute('stroke', line.color); l.setAttribute('stroke-width', (baseCellSize * 0.15).toString());
+                l.setAttribute('stroke-linecap', 'round');
+                if (currentMode === modes.ERASER) {
+                    group.style.pointerEvents = 'auto'; l.setAttribute('stroke-opacity', '0.4');
+                    group.onmousedown = (e) => { pushHistory(); lines.splice(index, 1); drawLines(); };
+                }
+                group.appendChild(hitArea); group.appendChild(l); svgLayer.appendChild(group);
+            });
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.btn-mode').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`mode-${mode}`).classList.add('active');
+            svgLayer.style.pointerEvents = mode === modes.ERASER ? 'auto' : 'none'; 
+            drawLines();
+        }
+
+        function downloadChart() {
+            const canvas = document.getElementById('export-canvas');
+            const ctx = canvas.getContext('2d');
+            const scaleFactor = 40; 
+            canvas.width = numCols * scaleFactor; canvas.height = numRows * scaleFactor;
+            ctx.fillStyle = '#fdf5e6'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#f0e6d2'; ctx.lineWidth = 1;
+            for(let i=0; i<=numCols; i++) { ctx.beginPath(); ctx.moveTo(i * scaleFactor, 0); ctx.lineTo(i * scaleFactor, canvas.height); ctx.stroke(); }
+            for(let i=0; i<=numRows; i++) { ctx.beginPath(); ctx.moveTo(0, i * scaleFactor); ctx.lineTo(canvas.width, i * scaleFactor); ctx.stroke(); }
+            ctx.fillStyle = '#d7ccc8';
+            for(let r=0; r<numRows; r++) { for(let c=0; c<numCols; c++) { ctx.beginPath(); ctx.arc((c * scaleFactor) + (scaleFactor/2), (r * scaleFactor) + (scaleFactor/2), 3, 0, Math.PI * 2); ctx.fill(); } }
+            lines.forEach(line => {
+                ctx.strokeStyle = line.color; ctx.lineWidth = 6; ctx.lineCap = 'round';
+                ctx.beginPath(); ctx.moveTo((line.c1 * scaleFactor) + (scaleFactor/2), (line.r1 * scaleFactor) + (scaleFactor/2));
+                ctx.lineTo((line.c2 * scaleFactor) + (scaleFactor/2), (line.r2 * scaleFactor) + (scaleFactor/2)); ctx.stroke();
+            });
+            const link = document.createElement('a'); link.download = `${projectNameInput.value || 'pattern'}.png`; 
+            link.href = canvas.toDataURL(); link.click();
+        }
+
+        init();
+    </script>
+</body>
+</html>
